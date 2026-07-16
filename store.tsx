@@ -1,0 +1,527 @@
+import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { supabase, supabaseSecondary } from './supabase';
+
+export type Employee = { id: string; name: string; role: string; department: string; status: string; avatar: string; user_id: string; hourly_rate?: number; salary_type?: 'hourly' | 'monthly'; monthly_salary?: number; annual_leave_quota?: number; sick_leave_quota?: number; };
+export type Shift = { id: string; employee_id: string; date: string; type: string; shift: string; user_id: string };
+export type Activity = { id: string; name: string; action: string; timestamp: string; user_id: string };
+export type User = { email: string; name: string; id: string; role: 'admin' | 'staff' };
+export type Leave = { id: string; employee_id: string; type: string; start_date: string; end_date: string; reason: string; status: 'Pending' | 'Approved' | 'Rejected'; user_id: string; document_url?: string };
+export type Announcement = { id: string; author_id?: string | null; title: string; content: string; created_at: string };
+export type TimeEntry = { id: string; employee_id: string; punch_in: string; punch_out: string | null; created_at: string };
+export type ShiftTrade = { id: string; shift_id: string; requester_id: string; receiver_id: string; status: 'Pending' | 'Approved' | 'Rejected'; created_at: string };
+export type Notification = { id: string; user_id: string; message: string; is_read: boolean; created_at: string };
+export type PayrollRecord = { id: string; employee_id: string; period: string; total_hours: number; base_pay: number; bonus: number; deductions: number; net_pay: number; status: 'Pending' | 'Paid'; created_at: string };
+export type Appraisal = { id: string; employee_id: string; reviewer_id: string; period: string; rating: number; comments: string; status: 'Draft' | 'Finalized'; created_at: string };
+export type JobScope = { id: string; title: string; department: string; role: string; description: string; created_at: string };
+export type Task = { id: string; title: string; description: string; assignee_id: string; assigner_id: string; status: 'To Do' | 'In Progress' | 'Done'; due_date: string; created_at: string };
+
+interface StoreContextType {
+  currentUser: User | null;
+  employees: Employee[];
+  shifts: Shift[];
+  activities: Activity[];
+  leaves: Leave[];
+  announcements: Announcement[];
+  timeEntries: TimeEntry[];
+  shiftTrades: ShiftTrade[];
+  notifications: Notification[];
+  payrollRecords: PayrollRecord[];
+  appraisals: Appraisal[];
+  jobScopes: JobScope[];
+  tasks: Task[];
+  saveJobScope: (jobScope: Omit<JobScope, 'id' | 'created_at'>) => Promise<void>;
+  updateJobScope: (id: string, updates: Partial<JobScope>) => Promise<void>;
+  deleteJobScope: (id: string) => Promise<void>;
+  saveTask: (task: Omit<Task, 'id' | 'created_at'>) => Promise<void>;
+  updateTask: (id: string, updates: Partial<Task>) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
+  saveAppraisal: (appraisal: Omit<Appraisal, 'id' | 'created_at'>) => Promise<void>;
+  updateAppraisal: (id: string, updates: Partial<Appraisal>) => Promise<void>;
+  deleteAppraisal: (id: string) => Promise<void>;
+  login: (email: string, pass: string) => Promise<any>;
+  signup: (email: string, pass: string, name: string, role: 'admin' | 'staff') => Promise<any>;
+  logout: () => Promise<void>;
+  addEmployee: (emp: Omit<Employee, 'id' | 'user_id'>) => Promise<void>;
+  registerEmployee: (email: string, pass: string, emp: Omit<Employee, 'id' | 'user_id'>) => Promise<void>;
+  updateEmployee: (id: string, emp: Partial<Employee>) => Promise<void>;
+  deleteEmployee: (id: string) => Promise<void>;
+  addShift: (shift: Omit<Shift, 'id' | 'user_id'>) => Promise<void>;
+  updateShift: (id: string, shift: Partial<Shift>) => Promise<void>;
+  deleteShift: (id: string) => Promise<void>;
+  addActivity: (activity: Omit<Activity, 'id' | 'timestamp' | 'user_id'>) => Promise<void>;
+  addLeave: (leave: Omit<Leave, 'id' | 'status' | 'user_id'>) => Promise<void>;
+  updateLeaveStatus: (id: string, status: 'Approved' | 'Rejected') => Promise<void>;
+  addAnnouncement: (announcement: Omit<Announcement, 'id' | 'created_at'>) => Promise<void>;
+  deleteAnnouncement: (id: string) => Promise<void>;
+  clockIn: (employee_id: string) => Promise<void>;
+  clockOut: (employee_id: string) => Promise<void>;
+  requestTrade: (trade: Omit<ShiftTrade, 'id' | 'status' | 'created_at'>) => Promise<void>;
+  updateTradeStatus: (id: string, status: 'Approved' | 'Rejected') => Promise<void>;
+  addNotification: (userId: string, message: string) => Promise<void>;
+  markNotificationRead: (id: string) => Promise<void>;
+  savePayrollRecord: (record: Omit<PayrollRecord, 'id' | 'created_at'>) => Promise<void>;
+  updatePayrollRecord: (id: string, record: Partial<PayrollRecord>) => Promise<void>;
+}
+
+const StoreContext = createContext<StoreContextType | undefined>(undefined);
+
+export function StoreProvider({ children }: { children: ReactNode }) {
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [shifts, setShifts] = useState<Shift[]>([]);
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [leaves, setLeaves] = useState<Leave[]>([]);
+  const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [timeEntries, setTimeEntries] = useState<TimeEntry[]>([]);
+  const [shiftTrades, setShiftTrades] = useState<ShiftTrade[]>([]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [payrollRecords, setPayrollRecords] = useState<PayrollRecord[]>([]);
+  const [appraisals, setAppraisals] = useState<Appraisal[]>([]);
+  const [jobScopes, setJobScopes] = useState<JobScope[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setCurrentUser({ email: session.user.email!, name: session.user.user_metadata?.name || '', id: session.user.id, role: session.user.user_metadata?.role || 'staff' });
+      }
+    }).catch(e => console.error('getSession error:', e));
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setCurrentUser({ email: session.user.email!, name: session.user.user_metadata?.name || '', id: session.user.id, role: session.user.user_metadata?.role || 'staff' });
+      } else {
+        setCurrentUser(null);
+      }
+    });
+  
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchData();
+    }
+  }, [currentUser]);
+
+  const fetchData = async () => {
+    try {
+      const [empRes, shiftRes, actRes, leaveRes, annRes, timeRes, tradeRes, notifRes, appraisalRes, jobScopeRes, tasksRes] = await Promise.all([
+        supabase.from('employees').select('*').order('name'),
+        supabase.from('shifts').select('*'),
+        supabase.from('activities').select('*').order('timestamp', { ascending: false }).limit(50),
+        supabase.from('leaves').select('*').order('start_date', { ascending: false }),
+        supabase.from('announcements').select('*').order('created_at', { ascending: false }),
+        supabase.from('time_entries').select('*').order('punch_in', { ascending: false }),
+        supabase.from('shift_trades').select('*').order('created_at', { ascending: false }),
+        supabase.from('notifications').select('*').eq('user_id', currentUser?.id).order('created_at', { ascending: false }),
+        supabase.from('appraisals').select('*').order('created_at', { ascending: false }),
+        supabase.from('job_scopes').select('*').order('created_at', { ascending: false }),
+        supabase.from('tasks').select('*').order('created_at', { ascending: false })
+      ]);
+
+      if (empRes.data) setEmployees(empRes.data);
+      if (shiftRes.data) setShifts(shiftRes.data);
+      if (actRes.data) setActivities(actRes.data);
+      if (leaveRes.data) setLeaves(leaveRes.data);
+      if (annRes.data) {
+        const now = new Date();
+        const threeDaysAgo = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000);
+        const validAnns = [];
+        for (const ann of annRes.data) {
+          if (new Date(ann.created_at) < threeDaysAgo) {
+            (async () => { try { await supabase.from('announcements').delete().eq('id', ann.id); } catch(e) { console.error(e); } })();
+          } else {
+            validAnns.push(ann);
+          }
+        }
+        setAnnouncements(validAnns);
+      }
+      if (timeRes.data) setTimeEntries(timeRes.data);
+      if (tradeRes.data) setShiftTrades(tradeRes.data);
+      if (notifRes.data) setNotifications(notifRes.data);
+      if (appraisalRes?.data) setAppraisals(appraisalRes.data);
+      if (jobScopeRes?.data) setJobScopes(jobScopeRes.data);
+      if (tasksRes?.data) setTasks(tasksRes.data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const login = async (email: string, pass: string) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
+    if (error) throw error;
+  };
+
+  const signup = async (email: string, pass: string, name: string, role: 'admin' | 'staff') => {
+    const { error } = await supabase.auth.signUp({
+      email, password: pass, options: { data: { name, role } }
+    });
+    if (error) throw error;
+  };
+
+  const logout = async () => {
+    await supabase.auth.signOut();
+  };
+
+  const addEmployee = async (emp: Omit<Employee, 'id' | 'user_id'>) => {
+    if (!currentUser) return;
+    const { data, error } = await supabase.from('employees').insert([{ ...emp, user_id: currentUser.id }]).select();
+    if (error) throw error;
+    if (data && data.length > 0) {
+      setEmployees(prev => [...prev, data[0]]);
+      addActivity({ name: emp.name, action: 'was added to the system' });
+    }
+  };
+
+  const registerEmployee = async (email: string, pass: string, emp: Omit<Employee, 'id' | 'user_id'>) => {
+    const { data: authData, error: authError } = await supabaseSecondary.auth.signUp({
+      email, password: pass, options: { data: { name: emp.name, role: emp.role === 'Admin' ? 'admin' : 'staff' } }
+    });
+    if (authError) throw authError;
+
+    const newUserId = authData.user?.id;
+    if (!newUserId) throw new Error("Failed to create user");
+
+    const { data, error } = await supabase.from('employees').insert([{ ...emp, user_id: newUserId }]).select();
+    if (error) throw error;
+    if (data && data.length > 0) {
+      setEmployees(prev => [...prev, data[0]]);
+      addActivity({ name: emp.name, action: 'was added to the system' });
+    }
+  };
+
+  const updateEmployee = async (id: string, emp: Partial<Employee>) => {
+    const { data, error } = await supabase.from('employees').update(emp).eq('id', id).select();
+    if (error) throw error;
+    if (data && data.length > 0) {
+      setEmployees(prev => prev.map(e => e.id === id ? data[0] : e));
+      addActivity({ name: data[0].name, action: 'profile was updated' });
+    }
+  };
+
+  const deleteEmployee = async (id: string) => {
+    const emp = employees.find(e => e.id === id);
+    const { error } = await supabase.from('employees').delete().eq('id', id);
+    if (error) throw error;
+    setEmployees(prev => prev.filter(e => e.id !== id));
+    if (emp) addActivity({ name: emp.name, action: 'was removed from the system' });
+  };
+
+  const addShift = async (shift: Omit<Shift, 'id' | 'user_id'>) => {
+    if (!currentUser) return;
+    const emp = employees.find(e => e.id === shift.employee_id);
+    const targetUserId = emp ? emp.user_id : currentUser.id;
+    const { data, error } = await supabase.from('shifts').insert([{ ...shift, user_id: targetUserId }]).select();
+    if (error) throw error;
+    if (data && data.length > 0) {
+      setShifts(prev => [...prev, data[0]]);
+      if (emp) {
+        addNotification(emp.user_id, `You have been assigned a new shift on ${shift.date}`);
+      }
+    }
+  };
+
+  const updateShift = async (id: string, shift: Partial<Shift>) => {
+    const { data, error } = await supabase.from('shifts').update(shift).eq('id', id).select();
+    if (error) throw error;
+    if (data && data.length > 0) {
+      setShifts(prev => prev.map(s => s.id === id ? data[0] : s));
+    }
+  };
+
+  const deleteShift = async (id: string) => {
+    const shift = shifts.find(s => s.id === id);
+    const { error } = await supabase.from('shifts').delete().eq('id', id);
+    if (error) throw error;
+    setShifts(prev => prev.filter(s => s.id !== id));
+    
+    if (shift) {
+       const emp = employees.find(e => e.id === shift.employee_id);
+       if (emp) {
+           addNotification(emp.user_id, `Your shift on ${shift.date} was cancelled`);
+       }
+    }
+  };
+
+  const addActivity = async (activity: Omit<Activity, 'id' | 'timestamp' | 'user_id'>) => {
+    if (!currentUser) return;
+    const { data, error } = await supabase.from('activities').insert([{ ...activity, user_id: currentUser.id }]).select();
+    if (error) console.error("Error adding activity", error);
+    if (data && data.length > 0) {
+      setActivities(prev => [data[0], ...prev].slice(0, 50));
+    }
+  };
+
+  const addLeave = async (leave: Omit<Leave, 'id' | 'status' | 'user_id'>) => {
+    if (!currentUser) return;
+    const { data, error } = await supabase.from('leaves').insert([{ ...leave, status: 'Pending', user_id: currentUser.id }]).select();
+    if (error) throw error;
+    if (data && data.length > 0) {
+      setLeaves(prev => [data[0], ...prev]);
+      
+      const emp = employees.find(e => e.id === leave.employee_id);
+      if (emp) {
+          addActivity({ name: emp.name, action: `requested ${leave.type}` });
+      }
+    }
+  };
+
+  const updateLeaveStatus = async (id: string, status: 'Approved' | 'Rejected') => {
+    const { data, error } = await supabase.from('leaves').update({ status }).eq('id', id).select();
+    if (error) throw error;
+    if (data && data.length > 0) {
+      setLeaves(prev => prev.map(l => l.id === id ? data[0] : l));
+      const leave = data[0];
+      const emp = employees.find(e => e.id === leave.employee_id);
+      if (emp) {
+          addActivity({ name: emp.name, action: `leave request was ${status.toLowerCase()}` });
+          addNotification(emp.user_id, `Your leave request from ${leave.start_date} to ${leave.end_date} was ${status}`);
+      }
+    }
+  };
+  
+  const addAnnouncement = async (ann: Omit<Announcement, 'id' | 'created_at'>) => {
+      const { data, error } = await supabase.from('announcements').insert([ann]).select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+          setAnnouncements(prev => [data[0], ...prev]);
+          addActivity({ name: "Admin", action: `posted an announcement: ${ann.title}` });
+      }
+  };
+
+  const deleteAnnouncement = async (id: string) => {
+      const { error } = await supabase.from('announcements').delete().eq('id', id);
+      if (error) throw error;
+      setAnnouncements(prev => prev.filter(a => a.id !== id));
+  };
+
+  const clockIn = async (employee_id: string) => {
+      const { data, error } = await supabase.from('time_entries').insert([{ 
+          employee_id, 
+          punch_in: new Date().toISOString() 
+      }]).select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+          setTimeEntries(prev => [data[0], ...prev]);
+          const emp = employees.find(e => e.id === employee_id);
+          if (emp) {
+              addActivity({ name: emp.name, action: `clocked in` });
+          }
+      }
+  };
+
+  const clockOut = async (employee_id: string) => {
+      // Find latest open entry
+      const entry = timeEntries.find(t => t.employee_id === employee_id && !t.punch_out);
+      if (!entry) throw new Error("No open time entry found");
+      
+      const { data, error } = await supabase.from('time_entries').update({ 
+          punch_out: new Date().toISOString() 
+      }).eq('id', entry.id).select();
+      
+      if (error) throw error;
+      if (data && data.length > 0) {
+          setTimeEntries(prev => prev.map(t => t.id === entry.id ? data[0] : t));
+          const emp = employees.find(e => e.id === employee_id);
+          if (emp) {
+              addActivity({ name: emp.name, action: `clocked out` });
+          }
+      }
+  };
+
+  const requestTrade = async (trade: Omit<ShiftTrade, 'id' | 'status' | 'created_at'>) => {
+      const { data, error } = await supabase.from('shift_trades').insert([{ 
+          ...trade, 
+          status: 'Pending' 
+      }]).select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+          setShiftTrades(prev => [data[0], ...prev]);
+          const requester = employees.find(e => e.id === trade.requester_id);
+          const receiver = employees.find(e => e.id === trade.receiver_id);
+          if (requester && receiver) {
+              addNotification(receiver.user_id, `${requester.name} requested to trade a shift with you.`);
+          }
+      }
+  };
+
+  const updateTradeStatus = async (id: string, status: 'Approved' | 'Rejected') => {
+      const { data, error } = await supabase.from('shift_trades').update({ status }).eq('id', id).select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+          setShiftTrades(prev => prev.map(t => t.id === id ? data[0] : t));
+          
+          const trade = data[0];
+          if (status === 'Approved') {
+              // Update the shift owner
+              await updateShift(trade.shift_id, { employee_id: trade.receiver_id });
+          }
+          
+          const requester = employees.find(e => e.id === trade.requester_id);
+          if (requester) {
+              addNotification(requester.user_id, `Your shift trade request was ${status}`);
+          }
+      }
+  };
+
+  const addNotification = async (userId: string, message: string) => {
+      const { data, error } = await supabase.from('notifications').insert([{ 
+          user_id: userId, message, is_read: false 
+      }]).select();
+      if (error) console.error(error);
+      if (data && data.length > 0 && userId === currentUser?.id) {
+          setNotifications(prev => [data[0], ...prev]);
+      }
+  };
+
+  const markNotificationRead = async (id: string) => {
+      const { data, error } = await supabase.from('notifications').update({ is_read: true }).eq('id', id).select();
+      if (error) console.error(error);
+      if (data && data.length > 0) {
+          setNotifications(prev => prev.map(n => n.id === id ? data[0] : n));
+      }
+  };
+
+
+  const savePayrollRecord = async (record: Omit<PayrollRecord, 'id' | 'created_at'>) => {
+    const { data: existing } = await supabase.from('payroll_records')
+      .select('id').eq('employee_id', record.employee_id).eq('period', record.period).single();
+      
+    if (existing) {
+      const { data, error } = await supabase.from('payroll_records').update(record).eq('id', existing.id).select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+        setPayrollRecords(prev => prev.map(p => p.id === existing.id ? data[0] : p));
+      }
+    } else {
+      const { data, error } = await supabase.from('payroll_records').insert([record]).select();
+      if (error) throw error;
+      if (data && data.length > 0) {
+        setPayrollRecords(prev => [...prev, data[0]]);
+      }
+    }
+  };
+
+  const updatePayrollRecord = async (id: string, record: Partial<PayrollRecord>) => {
+    const { data, error } = await supabase.from('payroll_records').update(record).eq('id', id).select();
+    if (error) throw error;
+    if (data && data.length > 0) {
+      setPayrollRecords(prev => prev.map(p => p.id === id ? data[0] : p));
+    }
+  };
+
+  
+  const saveJobScope = async (jobScope: Omit<JobScope, 'id' | 'created_at'>) => {
+    const { data, error } = await supabase.from('job_scopes').insert([jobScope]).select();
+    if (error) {
+      console.error(error);
+      // Fallback for demo without DB table
+      setJobScopes(prev => [{ ...jobScope, id: Math.random().toString(), created_at: new Date().toISOString() }, ...prev]);
+      return;
+    }
+    if (data && data.length > 0) {
+      setJobScopes(prev => [data[0], ...prev]);
+    }
+  };
+
+  const updateJobScope = async (id: string, updates: Partial<JobScope>) => {
+    const { data, error } = await supabase.from('job_scopes').update(updates).eq('id', id).select();
+    if (error) {
+       console.error(error);
+       setJobScopes(prev => prev.map(js => js.id === id ? { ...js, ...updates } : js));
+       return;
+    }
+    if (data && data.length > 0) {
+      setJobScopes(prev => prev.map(js => js.id === id ? data[0] : js));
+    }
+  };
+
+  const deleteJobScope = async (id: string) => {
+    const { error } = await supabase.from('job_scopes').delete().eq('id', id);
+    if (error) {
+       console.error(error);
+    }
+    setJobScopes(prev => prev.filter(js => js.id !== id));
+  };
+
+  const saveAppraisal = async (appraisal: Omit<Appraisal, 'id' | 'created_at'>) => {
+    const { data, error } = await supabase.from('appraisals').insert([appraisal]).select();
+    if (error) console.error(error);
+    if (data && data.length > 0) {
+      setAppraisals(prev => [data[0], ...prev]);
+    } else {
+        // Mock if offline
+        const mock: Appraisal = { ...appraisal, id: Date.now().toString(), created_at: new Date().toISOString() };
+        setAppraisals(prev => [mock, ...prev]);
+    }
+  };
+
+  const updateAppraisal = async (id: string, updates: Partial<Appraisal>) => {
+    const { data, error } = await supabase.from('appraisals').update(updates).eq('id', id).select();
+    if (error) console.error(error);
+    if (data && data.length > 0) {
+      setAppraisals(prev => prev.map(a => a.id === id ? data[0] : a));
+    } else {
+        setAppraisals(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
+    }
+  };
+
+  const saveTask = async (task: Omit<Task, 'id' | 'created_at'>) => {
+    const { data, error } = await supabase.from('tasks').insert([task]).select();
+    if (error) console.error(error);
+    if (data && data.length > 0) {
+      setTasks(prev => [data[0], ...prev]);
+    } else {
+        const mock: Task = { ...task, id: Date.now().toString(), created_at: new Date().toISOString() };
+        setTasks(prev => [mock, ...prev]);
+    }
+  };
+
+  const updateTask = async (id: string, updates: Partial<Task>) => {
+    const { data, error } = await supabase.from('tasks').update(updates).eq('id', id).select();
+    if (error) console.error(error);
+    if (data && data.length > 0) {
+      setTasks(prev => prev.map(t => t.id === id ? data[0] : t));
+    } else {
+      setTasks(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    }
+  };
+
+  const deleteTask = async (id: string) => {
+    const { error } = await supabase.from('tasks').delete().eq('id', id);
+    if (error) console.error(error);
+    setTasks(prev => prev.filter(t => t.id !== id));
+  };
+
+  const deleteAppraisal = async (id: string) => {
+    const { error } = await supabase.from('appraisals').delete().eq('id', id);
+    if (error) console.error(error);
+    setAppraisals(prev => prev.filter(a => a.id !== id));
+  };
+
+  return (
+    <StoreContext.Provider value={{ 
+      currentUser, employees, shifts, activities, leaves,
+      announcements, timeEntries, shiftTrades, notifications, payrollRecords, appraisals, jobScopes, tasks,
+      login, signup, logout,
+      addEmployee, registerEmployee, updateEmployee, deleteEmployee, 
+      addShift, updateShift, deleteShift, addActivity,
+      addLeave, updateLeaveStatus, addAnnouncement, deleteAnnouncement,
+      clockIn, clockOut, requestTrade, updateTradeStatus,
+      addNotification, markNotificationRead,
+      savePayrollRecord, updatePayrollRecord,
+      saveAppraisal, updateAppraisal, deleteAppraisal, saveJobScope, updateJobScope, deleteJobScope, saveTask, updateTask, deleteTask
+    }}>
+      {children}
+    </StoreContext.Provider>
+  );
+}
+
+export function useStore() {
+  const context = useContext(StoreContext);
+  if (context === undefined) {
+    throw new Error('useStore must be used within a StoreProvider');
+  }
+  return context;
+}

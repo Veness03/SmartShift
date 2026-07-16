@@ -1,0 +1,6 @@
+{
+  "name": "Smart Shift & Roster",
+  "description": "A modern, production-quality full-stack web application for shift & roster management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
